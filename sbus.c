@@ -25,8 +25,7 @@ int      device_fd;                /** serial port device to read SBUS; */
 int      channels_data[16]; /** 16 channels support; */
 uint8_t  buffer[25];
 char     device[30] = "/dev/ttyUSB0";
-uint8_t  sbusData[25];
-uint8_t  sbusData_int[25] = { 0x0f, 0x01, 0x04, 0x20, 0x00, 0xff, 0x07, 0x40, 0x00, 0x02, 0x10, 
+uint8_t  sbusData[25] = { 0x0f, 0x01, 0x04, 0x20, 0x00, 0xff, 0x07, 0x40, 0x00, 0x02, 0x10, 
            0x80, 0x2c, 0x64, 0x21, 0x0b, 0x59, 0x08, 0x40, 0x00, 0x02, 0x10, 0x80, 0x00, 0x00 };
 
 int init()
@@ -66,11 +65,11 @@ int init()
         return -1;
     }
 
-    printf("Open SBUS input %s worked, status %d \n", device, (int) device_fd);
+    //printf("Open SBUS input %s worked, status %d \n", device, (int) device_fd);
     return 0;
 }
 
-void run(void)
+void read_pkt(void)
 {
     int nread;
     int count_bad = 0;
@@ -80,7 +79,7 @@ void run(void)
         //good packet
         if (25 == nread){
             if (0x0f == sbusData[0] && 0x00 == sbusData[24]) { break; } 
-            else { ++count_bad; break; }
+            else { ++count_bad; }
         }
         ++wait;
         if(wait > 100){
@@ -110,22 +109,58 @@ void run(void)
     channels_data[14] = (uint16_t)(((sbusData[20] >> 2 | sbusData[21] << 6) & 0x07FF) * SBUS_SCALE_FACTOR + .5f) + SBUS_SCALE_OFFSET;
     channels_data[15] = (uint16_t)(((sbusData[21] >> 5 | sbusData[22] << 3) & 0x07FF) * SBUS_SCALE_FACTOR + .5f) + SBUS_SCALE_OFFSET;
 
-    printf("%3dms(wait) %3d(bad)       ch1 =%5d   ch2 =%5d   ch3 =%5d   ch4 =%5d   ch5 =%5d   ch6 =%5d   ch7 =%5d   ch8 =%5d\n", 5*wait, count_bad, 
-         channels_data[0], channels_data[1], channels_data[2], channels_data[3], channels_data[4], channels_data[5], channels_data[6], channels_data[7] );     
+    printf("%3dms(wait) %3d(bad)       ch1 =%5d   ch2 =%5d   ch3 =%5d   ch4 =%5d   ch5 =%5d\n", 5*wait, count_bad, 
+                channels_data[0], channels_data[1], channels_data[2], channels_data[3],channels_data[4]);     
+}
+
+int write_pkt () {
+    channels_data[0] = 1000; channels_data[1] = 1250; channels_data[2] = 1500; channels_data[3] = 1750;
+    channels_data[4] = 2000; channels_data[5] = 1000; channels_data[6] = 1000; channels_data[7] = 1000;
+    channels_data[8] = 1000; channels_data[9] = 1000; channels_data[10]= 1000; channels_data[11]= 1000;
+    channels_data[12]= 1000; channels_data[13]= 1000; channels_data[14]= 1000; channels_data[15]= 1000;
+    for (int x= 0; x <16; x++){
+       channels_data[x] = 0x07ff & (int) (((channels_data[x]-SBUS_TARGET_MIN)/SBUS_SCALE_FACTOR)+1.0f) + (int)SBUS_RANGE_MIN;
+    }
+    sbusData[0]  = 0x0f;
+    sbusData[1]  = 0xff & (                         ((channels_data[0]%(1<<9))<<0));   // 0.7 0.6 0.5 0.4 0.3 0.2 0.1 0.0
+    sbusData[2]  = 0xff & ((channels_data[0]>>8)  + ((channels_data[1]%(1<<6))<<3));   // 1.4 1.3 1.2 1.1 1.0 0.a 0.9 0.8
+    sbusData[3]  = 0xff & ((channels_data[1]>>5)  + ((channels_data[2]%(1<<2))<<6));   // 2.1 2.0 1.a 1.9 1.8 1.7 1.6 1.5
+    sbusData[4]  = 0xff & (                       + ((channels_data[2]%(1<<10))>>2));  // 2.9 2.8 2.7 2.6 2.5 2.4 2.3 2.2
+    sbusData[5]  = 0xff & ((channels_data[2]>>10) + ((channels_data[3]%(1<<7))<<1));   // 3.6 3.5 3.4 3.3 3.2 3.1 3.0 2.a
+    sbusData[6]  = 0xff & ((channels_data[3]>>7)  + ((channels_data[4]%(1<<4))<<4));   // 4.3 4.2 4.1 4.0 3.a 3.9 3.8 3.7
+    sbusData[7]  = 0xff & ((channels_data[4]>>4)  + ((channels_data[5]%(1<<1))<<7));   // 5.0 4.a 4.9 4.8 4.7 4.6 4.5 4.4
+    sbusData[8]  = 0xff & ((channels_data[5]>>1)  + ((channels_data[5]%(1<<9))>>1));   // 5.8 5.7 5.6 5.5 5.4 5.3 5.2 5.1
+    sbusData[9]  = 0xff & ((channels_data[5]>>9)  + ((channels_data[6]%(1<<6))<<2));   // 6.5 6.4 6.3 6.2 6.1 6.0 5.a 5.9
+    sbusData[10] = 0xff & ((channels_data[6]>>6)  + ((channels_data[7]%(1<<3))<<5));   // 7.2 7.1 7.0 6.a 6.9 6.8 6.7 6.6
+    sbusData[11] = 0xff & ((channels_data[7]>>3)                                  );   // 7.a 7.9 7.8 7.7 7.6 7.5 7.4 7.3
+    sbusData[12] = 0xff & (                         ((channels_data[8]%(1<<9))<<0));   // same pattern channels_data[x+8]
+    sbusData[13] = 0xff & ((channels_data[8]>>8)  + ((channels_data[9]%(1<<6))<<3));   
+    sbusData[14] = 0xff & ((channels_data[9]>>5)  + ((channels_data[10]%(1<<2))<<6));  
+    sbusData[15] = 0xff & (                       + ((channels_data[10]%(1<<10))>>2)); 
+    sbusData[16] = 0xff & ((channels_data[10]>>10)+ ((channels_data[11]%(1<<7))<<1));  
+    sbusData[17] = 0xff & ((channels_data[11]>>7) + ((channels_data[12]%(1<<4))<<4));  
+    sbusData[18] = 0xff & ((channels_data[12]>>4) + ((channels_data[13]%(1<<1))<<7));  
+    sbusData[19] = 0xff & ((channels_data[13]>>1) + ((channels_data[13]%(1<<9))>>1));  
+    sbusData[20] = 0xff & ((channels_data[13]>>9) + ((channels_data[14]%(1<<6))<<2));  
+    sbusData[21] = 0xff & ((channels_data[14]>>6) + ((channels_data[15]%(1<<3))<<5));  
+    sbusData[22] = 0xff & ((channels_data[15]>>3)                                  );  
+    sbusData[23] = 0x00;
+    sbusData[24] = 0x00;
+    write(device_fd, &sbusData, sizeof(sbusData));
 }
 
 int main(int argc, char **argv)
 {
     init();
     
-    write(device_fd, &sbusData_int, sizeof(sbusData_int));
-    run();
+    write_pkt();
+    read_pkt();
 
-    write(device_fd, &sbusData_int, sizeof(sbusData_int));
+    write(device_fd, &sbusData, sizeof(sbusData));
     usleep(5000);
-    run();
+    read_pkt();
 
-    run();
+    read_pkt();
 
     return 0;
 }
