@@ -11,6 +11,8 @@
 #include <sys/ioctl.h>
 #include <asm-generic/termbits.h>
 #include <errno.h>
+#include <time.h>
+
 #define RCINPUT_MEASURE_INTERVAL_US 4700
 /* define range mapping here, -+100% -> 1000..2000 */
 #define SBUS_RANGE_MIN 200.0f
@@ -21,10 +23,11 @@
 #define SBUS_SCALE_FACTOR ((SBUS_TARGET_MAX - SBUS_TARGET_MIN) / (SBUS_RANGE_MAX - SBUS_RANGE_MIN))
 #define SBUS_SCALE_OFFSET (int)(SBUS_TARGET_MIN - (SBUS_SCALE_FACTOR * SBUS_RANGE_MIN + 0.5f))
 
+clock_t  start;
 int      device_fd;                /** serial port device to read SBUS; */
 int      channels_data[16]; /** 16 channels support; */
 uint8_t  buffer[25];
-char     device[30] = "/dev/ttyUSB0";
+char     device[30] = "/dev/ttyUSB1";
 uint8_t  sbusData[25] = { 0x0f, 0x01, 0x04, 0x20, 0x00, 0xff, 0x07, 0x40, 0x00, 0x02, 0x10, 
            0x80, 0x2c, 0x64, 0x21, 0x0b, 0x59, 0x08, 0x40, 0x00, 0x02, 0x10, 0x80, 0x00, 0x00 };
 
@@ -65,29 +68,38 @@ int init()
         return -1;
     }
 
-    //printf("Open SBUS input %s worked, status %d \n", device, (int) device_fd);
+    printf("Open SBUS input %s worked, status %d \n", device, (int) device_fd);
     return 0;
 }
 
+
+int cnt = 0;
 void read_pkt(void)
 {
     int nread;
     int count_bad = 0;
-    int wait = 0;
+    int ptr = 0;
+    uint8_t  tempData[25];
     while (1) {
-        nread = read(device_fd, &sbusData, sizeof(sbusData));
+        ptr = 0;
+        while (ptr < 25){
+            nread = read(device_fd, &tempData , sizeof(tempData));
+            //printf("nread=%d ptr = %d\n",nread,ptr);
+            //for(int y=0;y<nread;y++)printf("0x%02x ",tempData[y]);
+            //printf("\n");
+            for( int x = 0; x < nread; x=x+1){
+                sbusData[ptr] = tempData[x];
+                ////printf("    x=%2d ptr = %2d 0x%02x 0x%02x\n",x,ptr,sbusData[ptr],tempData[x]);
+                ptr = ptr + 1;
+            }
+            usleep(5000);
+        }    
+        //if(nread>0 && nread != 25)printf("ptr=%d\n",ptr);
         //good packet
-        if (25 == nread){
+        if (25 == ptr){
             if (0x0f == sbusData[0] && 0x00 == sbusData[24]) { break; } 
             else { ++count_bad; }
         }
-        ++wait;
-        if(wait > 100){
-            printf("no good packet in 500ms port closing\n");
-            close(device_fd);
-            exit(1);
-        }
-        usleep(5000);
     }
 
     /* parse sbus data to pwm */
@@ -109,12 +121,13 @@ void read_pkt(void)
     channels_data[14] = (uint16_t)(((sbusData[20] >> 2 | sbusData[21] << 6) & 0x07FF) * SBUS_SCALE_FACTOR + .5f) + SBUS_SCALE_OFFSET;
     channels_data[15] = (uint16_t)(((sbusData[21] >> 5 | sbusData[22] << 3) & 0x07FF) * SBUS_SCALE_FACTOR + .5f) + SBUS_SCALE_OFFSET;
 
-    printf("%3dms(wait) %3d(bad)       ch1 =%5d   ch2 =%5d   ch3 =%5d   ch4 =%5d   ch5 =%5d\n", 5*wait, count_bad, 
-                channels_data[0], channels_data[1], channels_data[2], channels_data[3],channels_data[4]);     
+    printf("%8.3fms  %3d  ch1 =%5d   ch2 =%5d   ch3 =%5d   ch4 =%5d   ch5 =%5d\n", 
+       (float) 0.001*(clock()-start),  count_bad, channels_data[0], channels_data[1], channels_data[2], channels_data[3],channels_data[4]);     
+    fflush(stdout);
 }
 
 int write_pkt () {
-    channels_data[0] = 1000; channels_data[1] = 1250; channels_data[2] = 1500; channels_data[3] = 1750;
+    channels_data[0] = 1500; channels_data[1] = 1500; channels_data[2] = 1500; channels_data[3] = 1510;
     channels_data[4] = 2000; channels_data[5] = 1000; channels_data[6] = 1000; channels_data[7] = 1000;
     channels_data[8] = 1000; channels_data[9] = 1000; channels_data[10]= 1000; channels_data[11]= 1000;
     channels_data[12]= 1000; channels_data[13]= 1000; channels_data[14]= 1000; channels_data[15]= 1000;
@@ -151,16 +164,11 @@ int write_pkt () {
 
 int main(int argc, char **argv)
 {
+    //if (argc == 1){strcpy(device,argv[1]);}
+    start = clock();
     init();
     
-    write_pkt();
-    read_pkt();
-
-    write(device_fd, &sbusData, sizeof(sbusData));
-    usleep(5000);
-    read_pkt();
-
-    read_pkt();
+    while(1){ usleep(50000);read_pkt(); };
 
     return 0;
 }
