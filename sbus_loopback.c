@@ -11,6 +11,7 @@
 #include <sys/ioctl.h>
 #include <asm-generic/termbits.h>
 #include <errno.h>
+
 #define RCINPUT_MEASURE_INTERVAL_US 4700
 /* define range mapping here, -+100% -> 1000..2000 */
 #define SBUS_RANGE_MIN 200.0f
